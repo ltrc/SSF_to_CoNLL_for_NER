@@ -3,6 +3,7 @@ from argparse import ArgumentParser
 from re import S
 from re import search
 from re import findall
+from re import sub
 import os
 from glob import glob
 
@@ -22,10 +23,16 @@ def create_feature_dictionary_from_morph(morph_features):
     """Create feature dictionary from morph for a token."""
     feature_dict = {}
     for morph_feature in morph_features:
-        key, val = morph_feature.split('=')
-        if val[0] == "'" and val[-1] == "'":
-            val = val[1: -1]
-        feature_dict[key] = val
+        if morph_feature.find('=') != -1:
+            key, val = morph_feature.split('=', 1)
+            key = key.strip()
+            val = val.strip()
+            if val and val[0] == "'" and val[-1] == "'":
+                val = val[1: -1]
+            feature_dict[key] = val
+        else:
+            if len(morph_features) == 1 and 'ne' in morph_features[0]:
+                feature_dict[key] = feature_dict[key] + morph_feature
     return feature_dict
 
 
@@ -36,6 +43,7 @@ def extract_ner_data_in_ssf_form(ssf_sentences):
         lines = sent_text.split('\n')
         sent_ner_annotation = []
         ne_tag = ''
+        ne_type = ''
         for line in lines:
             line = line.strip()
             print(line)
@@ -58,6 +66,8 @@ def extract_ner_data_in_ssf_form(ssf_sentences):
                     ner_tag = ne_type + '-' + ne_tag
                     if ne_type == 'B':
                         ne_type = 'I'
+                    if not ne_type or not ne_tag:
+                        ner_tag = 'O'
                     token_ner_annotation = '\t'.join([token, ner_tag])
                     sent_ner_annotation.append(token_ner_annotation)
                 elif len(line_split) == 2 and search('^\d+\.\d+$', addr):
@@ -77,6 +87,7 @@ def extract_ner_data_in_ssf_form(ssf_sentences):
                         morph_text = morph[4: -1]
                     else:
                         morph_text = morph[1: -1]
+                    morph_text = sub('=\s+', '=', morph_text)
                     morph_features = morph_text.split()
                     print(morph_features)
                     feature_dict = create_feature_dictionary_from_morph(morph_features)
@@ -97,8 +108,9 @@ def write_lines_to_file(lines, file_path):
 def main():
     """Pass arguments and call functions here."""
     parser = ArgumentParser()
-    parser.add_argument('--input', dest='inp', help='Enter the input file path')
+    parser.add_argument('--input', dest='inp', help='Enter the input file/folder path')
     parser.add_argument('--output', dest='out', help='Enter the output file path')
+    parser.add_argument('--merge', dest='mer', help='Enter the merged file path which will combine all data', nargs='?')
     args = parser.parse_args()
     if not os.path.isdir(args.inp):
         input_text = read_text_from_file(args.inp)
@@ -106,13 +118,19 @@ def main():
         ner_annotations = extract_ner_data_in_ssf_form(ssf_sentences)
         write_lines_to_file(ner_annotations, args.out)
     else:
+        if not os.path.isdir(args.out):
+            os.makedirs(args.out)
         ner_annotations_all = []
         for file_path in glob(args.inp + '/*'):
+            print('FL', file_path)
             input_text = read_text_from_file(file_path)
             ssf_sentences = find_sentences_from_ssf_text(input_text)
             ner_annotations = extract_ner_data_in_ssf_form(ssf_sentences)
+            file_name = file_path[file_path.rfind('/') + 1:]
+            output_path = os.path.join(args.out, file_name)
+            write_lines_to_file(ner_annotations, output_path)
             ner_annotations_all.append('\n'.join(ner_annotations) + '\n')
-        write_lines_to_file(ner_annotations_all, args.out)
+        write_lines_to_file(ner_annotations_all, args.mer)
 
 
 if __name__ == '__main__':
